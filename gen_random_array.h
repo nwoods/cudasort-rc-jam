@@ -1,6 +1,9 @@
 #ifndef CUDASORT_RC_JAM_GEN_RANDOM_ARRAY__
 #define CUDASORT_RC_JAM_GEN_RANDOM_ARRAY__
 
+// Template function to generate arrays of random numbers.
+// All the "concepts" and template stuff is to allow one template to handle all cases allowed by the STL random library (but really I just wanted to learn c++20 concepts/requires)
+
 #include<random>
 #include<array>
 #include<limits>
