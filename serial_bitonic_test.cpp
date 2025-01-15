@@ -15,16 +15,19 @@ void print_array(const std::array<T, len>& arr)
     std::cout << "]" << std::endl;
 }
 
+constexpr size_t len = 128;
+
 int main()
 {
-    std::array<uint32_t, 16> in = random_array<uint32_t, 16>(0, 128);
+    std::array<uint32_t, len> in = random_array<uint32_t, len>(0, 500);
 
     std::cout << "Unsorted input array: " << std::endl;
     print_array(in);
 
-    std::array<uint32_t, 16> out;
+    std::array<uint32_t, len> out;
 
-    bitonic_sort_flip_serial(in.data(), out.data(), in.size());
+    // bitonic_sort_flip_serial(in.data(), out.data(), in.size());
+    bitonic_sort_serial(in.data(), out.data(), in.size());
 
     std::cout << "Sorted output array: " << std::endl;
     print_array(out);

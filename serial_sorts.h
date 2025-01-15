@@ -4,10 +4,13 @@
 #include<algorithm>
 
 #include<iostream>
+#include<cassert>
 
 template<typename T>
 void bitonic_sort_flip_serial(T* in, T* out, size_t len)
 {
+    assert(bool(len & (!(len & (len - 1))))); // len must be a power of 2
+
     std::copy(in, in + len, out);
 
     for(size_t k = 2; k <= len; k <<= 1)
@@ -18,19 +21,50 @@ void bitonic_sort_flip_serial(T* in, T* out, size_t len)
             {
                 const size_t l = (i ^ j);
 
-                if(l > i) std::cout << "k=" << k << ", j=" << j << ", i=" << i << ", l=" << l << ", arr[i]=" << out[i] << ", arr[l]=" << out[l] << " :: ";
-
-                if(l > i && (((i & k) == 0) == (out[i] > out[l])))
+                if(l > i && l < len && (((i & k) == 0) == (out[i] > out[l])))
                 {
                     std::swap(out[i], out[l]);
-                    std::cout << "Swapping!";
                 }
-                else if(l > i)
-                {
-                    std::cout << "Not swapping";
-                }
+            }
+        }
+    }
+}
 
-                if(l>i) std::cout << std::endl;
+template<typename T>
+void bitonic_sort_serial(T* in, T* out, size_t len)
+{
+    std::copy(in, in + len, out);
+
+    for(size_t pass = 0; (1 << pass) < len; ++pass)
+    {
+        for(size_t tier = 0; tier < len / (1 << (pass + 1)); ++tier)
+        {
+            for(size_t i = 0; i < (1 << pass); ++i)
+            {
+                const size_t lo = (1 << (pass + 1)) * tier + i;
+                const size_t hi = (1 << (pass + 1)) * tier + (1 << (pass + 1)) - i - 1;
+
+                if(out[hi] < out[lo])
+                {
+                    std::swap(out[hi], out[lo]);
+                }
+            }
+        }
+
+        for(size_t subpass = 0; subpass < pass; ++subpass)
+        {
+            for(size_t subtier = 0; subtier < len / (1 << (pass - subpass)); ++subtier)
+            {
+                for(size_t i = 0; i < (1 << (pass - subpass - 1)); ++i)
+                {
+                    const size_t lo = (1 << (pass - subpass)) * subtier + i;
+                    const size_t hi = lo + (1 << (pass - subpass - 1));
+
+                    if(out[hi] < out[lo])
+                    {
+                        std::swap(out[hi], out[lo]);
+                    }
+                }
             }
         }
     }
