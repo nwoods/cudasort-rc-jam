@@ -15,7 +15,7 @@ void print_array(const std::array<T, len>& arr)
     std::cout << "]" << std::endl;
 }
 
-constexpr size_t len = 128;
+constexpr size_t len = 127;
 
 int main()
 {
