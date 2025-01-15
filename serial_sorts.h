@@ -18,19 +18,19 @@ void bitonic_sort_flip_serial(T* in, T* out, size_t len)
             {
                 const size_t l = (i ^ j);
 
-                std::cout << "k=" << k << ", j=" << j << ", i=" << i << ", l=" << l << ", arr[i]=" << out[i] << ", arr[l]=" << out[l] << " :: ";
+                if(l > i) std::cout << "k=" << k << ", j=" << j << ", i=" << i << ", l=" << l << ", arr[i]=" << out[i] << ", arr[l]=" << out[l] << " :: ";
 
                 if(l > i && (((i & k) == 0) == (out[i] > out[l])))
                 {
                     std::swap(out[i], out[l]);
                     std::cout << "Swapping!";
                 }
-                else
+                else if(l > i)
                 {
                     std::cout << "Not swapping";
                 }
 
-                std::cout << std::endl;
+                if(l>i) std::cout << std::endl;
             }
         }
     }
