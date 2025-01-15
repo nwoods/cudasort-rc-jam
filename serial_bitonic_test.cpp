@@ -3,6 +3,7 @@
 
 #include<iostream>
 #include<array>
+#include<cassert>
 
 template<typename T, size_t len>
 void print_array(const std::array<T, len>& arr)
@@ -15,7 +16,15 @@ void print_array(const std::array<T, len>& arr)
     std::cout << "]" << std::endl;
 }
 
-constexpr size_t len = 127;
+void verify(const auto& arr)
+{
+    for(size_t i = 0; i < (arr.size() - 1); ++i)
+    {
+        assert(arr[i] <= arr[i+1]); // Sorted means monotonically increasing
+    }
+}
+
+constexpr size_t len = 200;
 
 int main()
 {
@@ -31,4 +40,8 @@ int main()
 
     std::cout << "Sorted output array: " << std::endl;
     print_array(out);
+
+    verify(out);
+
+    std::cout << "Sort successful!" << std::endl;
 }
