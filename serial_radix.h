@@ -1,5 +1,5 @@
-#ifndef CUDASORT_RC_JAM_SERIAL_SORTS__
-#define CUDASORT_RC_JAM_SERIAL_SORTS__
+#ifndef CUDASORT_RC_JAM_SERIAL_RADIX_SORT__
+#define CUDASORT_RC_JAM_SERIAL_RADIX_SORT__
 
 #include <iostream>
 #include <cstring>
