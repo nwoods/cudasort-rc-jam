@@ -18,6 +18,17 @@ void print_array(const std::array<T, len>& arr)
     std::cout << "]" << std::endl;
 }
 
+template<typename T>
+void print_array(const std::vector<T>& arr)
+{
+    std::cout << "[" << arr[0];
+    for(size_t i = 1; i < arr.size(); ++i)
+    {
+        std::cout << ", " << arr[i];
+    }
+    std::cout << "]" << std::endl;
+}
+
 void verify(const auto& arr)
 {
     for(size_t i = 0; i < (arr.size() - 1); ++i)
@@ -26,21 +37,28 @@ void verify(const auto& arr)
     }
 }
 
-constexpr size_t len = 200000000; // 16384 ;
+constexpr size_t len = (1 << 29);
 
 int main()
 {
-    std::vector<uint32_t> arr = random_array_v<uint32_t, len>(0, 500000000);
+    std::vector<uint32_t> arr = random_array_v<uint32_t, len>(0, 500000);
 
-    // std::cout << "Unsorted input array: " << std::endl;
-    // print_array(arr);
+    if(len <= 1024)
+    {
+        std::cout << "Unsorted input array: " << std::endl;
+        print_array(arr);
+    }
 
-    bitonic_sort_gpu(arr.data(), len);
+    // bitonic_sort_gpu(arr.data(), len);
+    bitonic_sort_shared(arr.data(), len);
 
     // std::sort(arr.begin(), arr.end());
 
-    // std::cout << "Sorted output array: " << std::endl;
-    // print_array(arr);
+    if(len <= 1024)
+    {
+        std::cout << "Sorted output array: " << std::endl;
+        print_array(arr);
+    }
 
     verify(arr);
 
