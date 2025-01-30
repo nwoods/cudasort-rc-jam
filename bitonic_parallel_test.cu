@@ -6,6 +6,7 @@
 #include<array>
 #include<cassert>
 #include<algorithm>
+#include<chrono>
 
 template<typename T, size_t len>
 void print_array(const std::array<T, len>& arr)
@@ -37,11 +38,11 @@ void verify(const auto& arr)
     }
 }
 
-constexpr size_t len = (1 << 29);
+constexpr size_t len = (1 << 30);
 
 int main()
 {
-    std::vector<uint32_t> arr = random_array_v<uint32_t, len>(0, 500000);
+    std::vector<uint32_t> arr = random_array_v<uint32_t, len>(0, 5000000);
 
     if(len <= 1024)
     {
@@ -49,10 +50,16 @@ int main()
         print_array(arr);
     }
 
+    auto t1 = std::chrono::high_resolution_clock::now();
+
     // bitonic_sort_gpu(arr.data(), len);
     bitonic_sort_shared(arr.data(), len);
 
     // std::sort(arr.begin(), arr.end());
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Sort took " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << "ms" << std::endl;
 
     if(len <= 1024)
     {
