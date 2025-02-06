@@ -170,12 +170,12 @@ __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned 
     {
         if(thread_elems >= (1 << (pass - subpass)))
         {
-            for(unsigned k = 0; k < (thread_elems + 1) / 2; ++k)
+            for(unsigned k = 0; k < ((thread_elems + 1) >> 1); ++k)
             {
                 // here, tier is within the elements this thread is responsible for
-                const unsigned tier = k / (1 << (pass - subpass - 1));
-                const unsigned column = k % (1 << (pass - subpass - 1));
-                const unsigned i = thread_elems * thread_idx + tier * (1 << (pass - subpass)) + column;
+                const unsigned tier = (k >> (pass - subpass - 1));
+                const unsigned column = ::fast_mod_pow_2(k, (pass - subpass - 1));
+                const unsigned i = thread_elems * thread_idx + (tier << (pass - subpass)) + column;
                 const unsigned j = i + (1 << (pass - subpass - 1));
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
@@ -188,13 +188,13 @@ __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned 
         }
         else
         {
-            for(unsigned k = 0; k < (thread_elems + 1) / 2; ++k)
+            for(unsigned k = 0; k < ((thread_elems + 1) >> 1); ++k)
             {
-                const unsigned thread_first_idx = thread_elems / 2 * thread_idx;
+                const unsigned thread_first_idx = (thread_elems >> 1) * thread_idx;
                 // Here, tier is within the elements the block is responsible for
-                const unsigned tier = (thread_first_idx + k) / (1 << (pass - subpass - 1));
-                const unsigned column = (thread_first_idx + k) % (1 << (pass - subpass - 1));
-                const unsigned i = tier * (1 << (pass - subpass)) + column;
+                const unsigned tier = (thread_first_idx + k) >> (pass - subpass - 1);
+                const unsigned column = ::fast_mod_pow_2(thread_first_idx + k, pass - subpass - 1);
+                const unsigned i = (tier << (pass - subpass)) + column;
                 const unsigned j = i + (1 << (pass - subpass - 1));
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
@@ -268,13 +268,13 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
         // step a
         if(thread_elems >= (1 << (pass + 1))) // thread can do entire sub-problem
         {
-            for(unsigned k = 0; k < (thread_elems + 1) / 2; ++k)
+            for(unsigned k = 0; k < ((thread_elems + 1) >> 1); ++k)
             {
                 // here, tier is within the elements this thread is responsible for
-                const unsigned tier = k / (1 << pass);
-                const unsigned column = k % (1 << pass);
-                const unsigned i = thread_elems * thread_idx + tier * (1 << (pass + 1)) + column;
-                const unsigned j = thread_elems * thread_idx + (tier + 1) * (1 << (pass + 1)) - 1 - column;
+                const unsigned tier = k >> pass;
+                const unsigned column = ::fast_mod_pow_2(k, pass);
+                const unsigned i = thread_elems * thread_idx + (tier << (pass + 1)) + column;
+                const unsigned j = thread_elems * thread_idx + ((tier + 1) << (pass + 1)) - 1 - column;
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
                 {
@@ -289,14 +289,14 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
             // previous step let threads run independently, sync here now that they are dependent for the first time
             __syncthreads();
 
-            for(unsigned k = 0; k < (thread_elems + 1) / 2; ++k)
+            for(unsigned k = 0; k < ((thread_elems + 1) >> 1); ++k)
             {
-                const unsigned thread_first_idx = thread_elems / 2 * thread_idx;
+                const unsigned thread_first_idx = (thread_elems >> 1) * thread_idx;
                 // Here, tier is within the elements the block is responsible for
-                const unsigned tier = (thread_first_idx + k) / (1 << (pass));
-                const unsigned column = (thread_first_idx + k) % (1 << pass);
-                const unsigned i = tier * (1 << (pass + 1)) + column;
-                const unsigned j = (tier + 1) * (1 << (pass + 1)) - column - 1;
+                const unsigned tier = (thread_first_idx + k) >> pass;
+                const unsigned column = ::fast_mod_pow_2((thread_first_idx + k), pass);
+                const unsigned i = (tier << (pass + 1)) + column;
+                const unsigned j = ((tier + 1)  << (pass + 1)) - column - 1;
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
                 {
