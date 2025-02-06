@@ -6,6 +6,10 @@
 
 #include<iostream>
 
+// Do not abuse SWAP
+// Do not use if &a == &b
+#define SWAP(a, b) (((a) ^= (b)), ((b) ^= (a)), ((a) ^= (b)))
+
 
 namespace
 {
@@ -94,10 +98,11 @@ namespace
     }
 } // anonymous namespace
 
-template<typename T>
+template<typename T> // TODO restrict to types where the bit twiddling hacks work
 __global__ void bitonic_kernel_a(T* arr, std::size_t pass, std::size_t len)
 {
-    const std::size_t idx = blockDim.x * blockIdx.x + threadIdx.x;
+    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
+    const std::size_t idx = blockDim.x * blockIdx.x + thread_idx;
     // i = idx // 2^k * 2^(k+1) + idx % k where k=pass
     // note idx//2^k * 2^(k+1) != 2*idx because integer division is floored
     const std::size_t i = ((idx >> pass) << (pass + 1)) + ::fast_mod_pow_2(idx, pass);
@@ -105,29 +110,26 @@ __global__ void bitonic_kernel_a(T* arr, std::size_t pass, std::size_t len)
 
     if(/*j > i && */j < len && arr[j] < arr[i])
     {
-        T tmp = arr[j];
-        arr[j] = arr[i];
-        arr[i] = tmp;
+        SWAP(arr[i], arr[j]);
     }
 }
 
-template<typename T>
+template<typename T> // TODO restrict to types where the bit twiddling hacks work
 __global__ void bitonic_kernel_b(T* arr, std::size_t pass, std::size_t subpass, std::size_t len)
 {
-    const std::size_t idx = blockDim.x * blockIdx.x + threadIdx.x;
+    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
+    const std::size_t idx = blockDim.x * blockIdx.x + thread_idx;
     // i = idx // 2^k * 2^(k+1) + idx % k where k=(pass-subpass)
     const std::size_t i = ((idx >> (pass - subpass - 1)) << (pass - subpass)) + ::fast_mod_pow_2(idx, pass - subpass - 1);
     const std::size_t j = i + (1 << (pass - subpass - 1));
 
     if(j < len && arr[j] < arr[i])
     {
-        T tmp = arr[j];
-        arr[j] = arr[i];
-        arr[i] = tmp;
+        SWAP(arr[i], arr[j]);
     }
 }
 
-template<typename T>
+template<typename T> // TODO restrict to types where the bit twiddling hacks work
 __host__ void bitonic_sort_gpu(T* h_arr, std::size_t len)
 {
     const std::size_t fakelen = ::next_power_of_2(len);
@@ -158,7 +160,7 @@ __host__ void bitonic_sort_gpu(T* h_arr, std::size_t len)
     cudaFree(d_arr);
 }
 
-template<typename T>
+template<typename T> // TODO restrict to types where the bit twiddling hacks work
 __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned pass, unsigned first_subpass, std::size_t len)
 {
     // const unsigned block_elems = 1 << (pass - first_subpass);
@@ -180,9 +182,7 @@ __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned 
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
                 {
-                    T tmp = shared[j];
-                    shared[j] = shared[i];
-                    shared[i] = tmp;
+                    SWAP(shared[i], shared[j]);
                 }
             }
         }
@@ -199,9 +199,7 @@ __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned 
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
                 {
-                    T tmp = shared[j];
-                    shared[j] = shared[i];
-                    shared[i] = tmp;
+                    SWAP(shared[i], shared[j]);
                 }
             }
 
@@ -210,7 +208,7 @@ __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned 
     }
 }
 
-template<typename T>
+template<typename T> // TODO restrict to types where the bit twiddling hacks work
 __global__ void finish_bitonic_step_b_shared(T* arr, unsigned pass, unsigned first_subpass, unsigned len)
 {
     extern __shared__ T shared[];
@@ -243,7 +241,7 @@ __global__ void finish_bitonic_step_b_shared(T* arr, unsigned pass, unsigned fir
     }
 }
 
-template<typename T>
+template<typename T> // TODO restrict to types where the bit twiddling hacks work
 __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned len)
 {
     extern __shared__ T shared[];
@@ -278,9 +276,7 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
                 {
-                    T tmp = shared[j];
-                    shared[j] = shared[i];
-                    shared[i] = tmp;
+                    SWAP(shared[i], shared[j]);
                 }
             }
         }
@@ -300,9 +296,7 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
                 {
-                    T tmp = shared[j];
-                    shared[j] = shared[i];
-                    shared[i] = tmp;
+                    SWAP(shared[i], shared[j]);
                 }
             }
 
@@ -323,7 +317,7 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
     }
 }
 
-template<typename T>
+template<typename T> // TODO restrict to types where the bit twiddling hacks work
 __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
 {
     cudaError_t err;
@@ -375,7 +369,7 @@ __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
 
     std::cout << "Done with shared memory part, moving to final passes" << std::endl;
 
-    const std::size_t threadsPerBlock = 512; // does this matter?
+    const std::size_t threadsPerBlock = 128; // does this matter?
     // in principle we only need len/2 threads, not fakelen/2, but it would require some logic changes to skip some values of idx.
     // Maybe a feature to add later.
     const std::size_t n_blocks = (((fakelen + 1) / 2) + threadsPerBlock - 1) / threadsPerBlock;
