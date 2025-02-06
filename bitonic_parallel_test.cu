@@ -38,7 +38,7 @@ void verify(const auto& arr)
     }
 }
 
-constexpr size_t len = (1 << 30);
+constexpr size_t len = (1 << 28);
 
 int main()
 {

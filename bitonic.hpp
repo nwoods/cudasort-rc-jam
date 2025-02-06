@@ -41,15 +41,56 @@ namespace
     }
 
     // fast computation of x % (2^n)
-    __device__ inline size_t fast_mod_pow_2(size_t x, size_t n)
+    template<std::unsigned_integral T>
+    __device__ inline T fast_mod_pow_2(T x, unsigned n)
     {
         return x & ((1 << n) - 1);
+    }
+
+    // As above but you give it a number assumed to be a power of 2 instead of the exponent
+    template<std::unsigned_integral T>
+    __device__ inline T fast_mod_known_pow_2(T x, T m)
+    {
+        return x & (m - 1);
+    }
+
+    // x / d assuming d is a power of 2
+    template<std::unsigned_integral T>
+    __device__ inline T fast_div_known_pow_2(T x, T d)
+    {
+        while(d && x)
+        {
+            d >>= 1;
+            x >>= 1;
+        }
+
+        return x;
+    }
+
+    template<std::integral T>
+    __device__ inline bool is_pow_2(T x)
+    {
+        return bool(x) && !bool(x & (x - 1));
     }
 
     template<typename T>
     __device__ T my_min(T a, T b)
     {
         return a < b ? a : b;
+    }
+
+    // shuffle thread indices 32 ways within a block so threads in the same warp will almost never try to access nearby memory
+    // Only works if blocksize is a power of 2 (otherwise leaves index unchangede)
+    __device__ int thread_index_shuffle(unsigned threadidx, unsigned blocksize)
+    {
+        const unsigned warpsize = 32;
+
+        if(blocksize < warpsize || !is_pow_2(blocksize))
+        {
+            return threadidx;
+        }
+
+        return fast_mod_known_pow_2(threadidx + fast_mod_known_pow_2(threadidx, warpsize) * (fast_div_known_pow_2(blocksize, warpsize)), blocksize);
     }
 } // anonymous namespace
 
@@ -121,6 +162,7 @@ template<typename T>
 __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned pass, unsigned first_subpass, std::size_t len)
 {
     // const unsigned block_elems = 1 << (pass - first_subpass);
+    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
     const unsigned block_first_i = block_elems * blockIdx.x;
     const unsigned thread_elems = (block_elems + blockDim.x - 1) / blockDim.x;
 
@@ -133,7 +175,7 @@ __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned 
                 // here, tier is within the elements this thread is responsible for
                 const unsigned tier = k / (1 << (pass - subpass - 1));
                 const unsigned column = k % (1 << (pass - subpass - 1));
-                const unsigned i = thread_elems * threadIdx.x + tier * (1 << (pass - subpass)) + column;
+                const unsigned i = thread_elems * thread_idx + tier * (1 << (pass - subpass)) + column;
                 const unsigned j = i + (1 << (pass - subpass - 1));
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
@@ -148,7 +190,7 @@ __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned 
         {
             for(unsigned k = 0; k < (thread_elems + 1) / 2; ++k)
             {
-                const unsigned thread_first_idx = thread_elems / 2 * threadIdx.x;
+                const unsigned thread_first_idx = thread_elems / 2 * thread_idx;
                 // Here, tier is within the elements the block is responsible for
                 const unsigned tier = (thread_first_idx + k) / (1 << (pass - subpass - 1));
                 const unsigned column = (thread_first_idx + k) % (1 << (pass - subpass - 1));
@@ -173,13 +215,17 @@ __global__ void finish_bitonic_step_b_shared(T* arr, unsigned pass, unsigned fir
 {
     extern __shared__ T shared[];
 
+    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
     const unsigned block_elems = 1 << (pass - first_subpass);
     const unsigned block_first_i = block_elems * blockIdx.x;
     const unsigned thread_elems = (block_elems + blockDim.x - 1) / blockDim.x;
 
-    if((block_first_i + thread_elems * threadIdx.x) < len)
+    if((block_first_i + thread_elems * thread_idx) < len)
     {
-        std::memcpy(&shared[thread_elems * threadIdx.x], &arr[block_first_i + thread_elems * threadIdx.x], ::my_min(thread_elems, len - (block_first_i + thread_elems * threadIdx.x)) * sizeof(T));
+        for(unsigned i = 0; i < ::my_min(thread_elems, len - (block_first_i + thread_elems * thread_idx)); ++i)
+        {
+            shared[thread_elems * thread_idx + i] = arr[block_first_i + thread_elems * thread_idx + i];
+        }
     }
 
     __syncthreads();
@@ -188,9 +234,12 @@ __global__ void finish_bitonic_step_b_shared(T* arr, unsigned pass, unsigned fir
 
     __syncthreads();
 
-    if((block_first_i + thread_elems * threadIdx.x) < len)
+    if((block_first_i + thread_elems * thread_idx) < len)
     {
-        std::memcpy(&arr[block_first_i + thread_elems * threadIdx.x], &shared[thread_elems * threadIdx.x], ::my_min(thread_elems, len - (block_first_i + thread_elems * threadIdx.x)) * sizeof(T));
+        for(unsigned i = 0; i < ::my_min(thread_elems, len - (block_first_i + thread_elems * thread_idx)); ++i)
+        {
+            arr[block_first_i + thread_elems * thread_idx + i] = shared[thread_elems * thread_idx + i];
+        }
     }
 }
 
@@ -199,13 +248,17 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
 {
     extern __shared__ T shared[];
 
+    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
     const unsigned block_elems = 1 << passes_to_do;
     const unsigned block_first_i = block_elems * blockIdx.x;
     const unsigned thread_elems = (block_elems + blockDim.x - 1) / blockDim.x;
 
-    if((block_first_i + thread_elems * threadIdx.x) < len)
+    if((block_first_i + thread_elems * thread_idx) < len)
     {
-        std::memcpy(&shared[thread_elems * threadIdx.x], &arr[block_first_i + thread_elems * threadIdx.x], ::my_min(thread_elems, len - (block_first_i + thread_elems * threadIdx.x)) * sizeof(T));
+        for(unsigned i = 0; i < ::my_min(thread_elems, len - (block_first_i + thread_elems * thread_idx)); ++i)
+        {
+            shared[thread_elems * thread_idx + i] = arr[block_first_i + thread_elems * thread_idx + i];
+        }
     }
 
     __syncthreads();
@@ -220,8 +273,8 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
                 // here, tier is within the elements this thread is responsible for
                 const unsigned tier = k / (1 << pass);
                 const unsigned column = k % (1 << pass);
-                const unsigned i = thread_elems * threadIdx.x + tier * (1 << (pass + 1)) + column;
-                const unsigned j = thread_elems * threadIdx.x + (tier + 1) * (1 << (pass + 1)) - 1 - column;
+                const unsigned i = thread_elems * thread_idx + tier * (1 << (pass + 1)) + column;
+                const unsigned j = thread_elems * thread_idx + (tier + 1) * (1 << (pass + 1)) - 1 - column;
 
                 if((block_first_i + j) < len && shared[j] < shared[i])
                 {
@@ -238,7 +291,7 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
 
             for(unsigned k = 0; k < (thread_elems + 1) / 2; ++k)
             {
-                const unsigned thread_first_idx = thread_elems / 2 * threadIdx.x;
+                const unsigned thread_first_idx = thread_elems / 2 * thread_idx;
                 // Here, tier is within the elements the block is responsible for
                 const unsigned tier = (thread_first_idx + k) / (1 << (pass));
                 const unsigned column = (thread_first_idx + k) % (1 << pass);
@@ -261,9 +314,12 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
 
     __syncthreads();
 
-    if((block_first_i + thread_elems * threadIdx.x) < len)
+    if((block_first_i + thread_elems * thread_idx) < len)
     {
-        std::memcpy(&arr[block_first_i + thread_elems * threadIdx.x], &shared[thread_elems * threadIdx.x], ::my_min(thread_elems, len - (block_first_i + thread_elems * threadIdx.x)) * sizeof(T));
+        for(unsigned i = 0; i < ::my_min(thread_elems, len - (block_first_i + thread_elems * thread_idx)); ++i)
+        {
+            arr[block_first_i + thread_elems * thread_idx + i] = shared[thread_elems * thread_idx + i];
+        }
     }
 }
 
