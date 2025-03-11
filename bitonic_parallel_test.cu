@@ -42,7 +42,7 @@ constexpr size_t len = (1 << 28);
 
 int main()
 {
-    std::vector<uint32_t> arr = random_array_v<uint32_t, len>(0, 5000000);
+    std::vector<float> arr = random_array_v<float, len>(0, 500.);
 
     if(len <= 1024)
     {

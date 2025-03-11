@@ -6,9 +6,7 @@
 
 #include<iostream>
 
-// Do not abuse SWAP
-// Do not use if &a == &b
-#define SWAP(a, b) (((a) ^= (b)), ((b) ^= (a)), ((a) ^= (b)))
+#include "vec_typedefs.hpp"
 
 
 namespace
@@ -96,40 +94,46 @@ namespace
 
         return fast_mod_known_pow_2(threadidx + fast_mod_known_pow_2(threadidx, warpsize) * (fast_div_known_pow_2(blocksize, warpsize)), blocksize);
     }
+
+    template<typename T>
+    __device__ void swap(T& a, T& b)
+    {
+        T tmp = a;
+        a = b;
+        b = tmp;
+    }
 } // anonymous namespace
 
-template<typename T> // TODO restrict to types where the bit twiddling hacks work
+template<typename T>
 __global__ void bitonic_kernel_a(T* arr, std::size_t pass, std::size_t len)
 {
-    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
-    const std::size_t idx = blockDim.x * blockIdx.x + thread_idx;
+    const std::size_t idx = blockDim.x * blockIdx.x + threadIdx.x;
     // i = idx // 2^k * 2^(k+1) + idx % k where k=pass
     // note idx//2^k * 2^(k+1) != 2*idx because integer division is floored
     const std::size_t i = ((idx >> pass) << (pass + 1)) + ::fast_mod_pow_2(idx, pass);
     const std::size_t j = ((idx >> pass) << (pass + 1)) + (1 << (pass + 1)) - ::fast_mod_pow_2(idx, pass) - 1;
 
-    if(/*j > i && */j < len && arr[j] < arr[i])
+    if(j < len && arr[j] < arr[i])
     {
-        SWAP(arr[i], arr[j]);
+        ::swap(arr[i], arr[j]);
     }
 }
 
-template<typename T> // TODO restrict to types where the bit twiddling hacks work
+template<typename T>
 __global__ void bitonic_kernel_b(T* arr, std::size_t pass, std::size_t subpass, std::size_t len)
 {
-    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
-    const std::size_t idx = blockDim.x * blockIdx.x + thread_idx;
+    const std::size_t idx = blockDim.x * blockIdx.x + threadIdx.x;
     // i = idx // 2^k * 2^(k+1) + idx % k where k=(pass-subpass)
     const std::size_t i = ((idx >> (pass - subpass - 1)) << (pass - subpass)) + ::fast_mod_pow_2(idx, pass - subpass - 1);
     const std::size_t j = i + (1 << (pass - subpass - 1));
 
     if(j < len && arr[j] < arr[i])
     {
-        SWAP(arr[i], arr[j]);
+        ::swap(arr[i], arr[j]);
     }
 }
 
-template<typename T> // TODO restrict to types where the bit twiddling hacks work
+template<typename T>
 __host__ void bitonic_sort_gpu(T* h_arr, std::size_t len)
 {
     const std::size_t fakelen = ::next_power_of_2(len);
@@ -160,70 +164,58 @@ __host__ void bitonic_sort_gpu(T* h_arr, std::size_t len)
     cudaFree(d_arr);
 }
 
-template<typename T> // TODO restrict to types where the bit twiddling hacks work
+template<typename T>
 __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned pass, unsigned first_subpass, std::size_t len)
 {
     // const unsigned block_elems = 1 << (pass - first_subpass);
     const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
     const unsigned block_first_i = block_elems * blockIdx.x;
     const unsigned thread_elems = (block_elems + blockDim.x - 1) / blockDim.x;
+    const unsigned thread_cmps = (thread_elems + 1) >> 1;
 
     for(unsigned subpass = first_subpass; subpass < pass; ++subpass)
     {
-        if(thread_elems >= (1 << (pass - subpass)))
+        for(unsigned k = thread_cmps * thread_idx; k < thread_cmps * (thread_idx + 1); ++k)
         {
-            for(unsigned k = 0; k < ((thread_elems + 1) >> 1); ++k)
-            {
-                // here, tier is within the elements this thread is responsible for
-                const unsigned tier = (k >> (pass - subpass - 1));
-                const unsigned column = ::fast_mod_pow_2(k, (pass - subpass - 1));
-                const unsigned i = thread_elems * thread_idx + (tier << (pass - subpass)) + column;
-                const unsigned j = i + (1 << (pass - subpass - 1));
+            const unsigned i = ((k >> (pass - subpass - 1)) << (pass - subpass)) + ::fast_mod_pow_2(k, pass - subpass - 1);
+            const unsigned j = i + (1 << (pass - subpass - 1));
 
-                if((block_first_i + j) < len && shared[j] < shared[i])
-                {
-                    SWAP(shared[i], shared[j]);
-                }
+            if((block_first_i + j) < len && shared[j] < shared[i])
+            {
+                ::swap(shared[i], shared[j]);
             }
         }
-        else
+
+        // sync if a different thread will check some of these elements next
+        if(thread_elems < (1 << (pass - subpass)))
         {
-            for(unsigned k = 0; k < ((thread_elems + 1) >> 1); ++k)
-            {
-                const unsigned thread_first_idx = (thread_elems >> 1) * thread_idx;
-                // Here, tier is within the elements the block is responsible for
-                const unsigned tier = (thread_first_idx + k) >> (pass - subpass - 1);
-                const unsigned column = ::fast_mod_pow_2(thread_first_idx + k, pass - subpass - 1);
-                const unsigned i = (tier << (pass - subpass)) + column;
-                const unsigned j = i + (1 << (pass - subpass - 1));
-
-                if((block_first_i + j) < len && shared[j] < shared[i])
-                {
-                    SWAP(shared[i], shared[j]);
-                }
-            }
-
             __syncthreads();
         }
     }
 }
 
-template<typename T> // TODO restrict to types where the bit twiddling hacks work
+template<typename T>
 __global__ void finish_bitonic_step_b_shared(T* arr, unsigned pass, unsigned first_subpass, unsigned len)
 {
     extern __shared__ T shared[];
 
-    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
     const unsigned block_elems = 1 << (pass - first_subpass);
     const unsigned block_first_i = block_elems * blockIdx.x;
-    const unsigned thread_elems = (block_elems + blockDim.x - 1) / blockDim.x;
+    const unsigned thread_elems = block_elems / blockDim.x + (threadIdx.x < (block_elems % blockDim.x) ? 1u : 0u);
 
-    if((block_first_i + thread_elems * thread_idx) < len)
+    constexpr std::size_t vecsize = 4;
+
+    typedef typename Vec_t<T, vecsize>::type VecType;
+
+    unsigned i = 0;
+    for(; i < (thread_elems / vecsize); ++i)
     {
-        for(unsigned i = 0; i < ::my_min(thread_elems, len - (block_first_i + thread_elems * thread_idx)); ++i)
-        {
-            shared[thread_elems * thread_idx + i] = arr[block_first_i + thread_elems * thread_idx + i];
-        }
+        reinterpret_cast<VecType*>(&shared[(i * blockDim.x + threadIdx.x) * vecsize])[0] = reinterpret_cast<VecType*>(&arr[block_first_i + (i * blockDim.x + threadIdx.x) * vecsize])[0];
+    }
+    i *= vecsize;
+    for(; i < thread_elems; ++i) // in case it's not a multiple of 4
+    {
+        shared[i * blockDim.x + threadIdx.x] = arr[block_first_i + i * blockDim.x + threadIdx.x];
     }
 
     __syncthreads();
@@ -232,74 +224,73 @@ __global__ void finish_bitonic_step_b_shared(T* arr, unsigned pass, unsigned fir
 
     __syncthreads();
 
-    if((block_first_i + thread_elems * thread_idx) < len)
+    // stop shuffling (keep global memory accesses coalesced)
+    i = 0;
+    for(; i < (thread_elems / vecsize); ++i)
     {
-        for(unsigned i = 0; i < ::my_min(thread_elems, len - (block_first_i + thread_elems * thread_idx)); ++i)
-        {
-            arr[block_first_i + thread_elems * thread_idx + i] = shared[thread_elems * thread_idx + i];
-        }
+        reinterpret_cast<VecType*>(&arr[block_first_i + (i * blockDim.x + threadIdx.x) * vecsize])[0] = reinterpret_cast<VecType*>(&shared[(i * blockDim.x + threadIdx.x) * vecsize])[0];
+    }
+    i *= vecsize;
+    for(; i < thread_elems; ++i) // in case it's not a multiple of 4
+    {
+        arr[block_first_i + i * blockDim.x + threadIdx.x] = shared[i * blockDim.x + threadIdx.x];
     }
 }
 
-template<typename T> // TODO restrict to types where the bit twiddling hacks work
+template<typename T>
 __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned len)
 {
     extern __shared__ T shared[];
 
-    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
     const unsigned block_elems = 1 << passes_to_do;
     const unsigned block_first_i = block_elems * blockIdx.x;
-    const unsigned thread_elems = (block_elems + blockDim.x - 1) / blockDim.x;
+    const unsigned thread_elems_cpy = block_elems / blockDim.x + (threadIdx.x < (block_elems % blockDim.x) ? 1u : 0u);
 
-    if((block_first_i + thread_elems * thread_idx) < len)
+    constexpr std::size_t vecsize = 4;
+
+    typedef typename Vec_t<T, vecsize>::type VecType;
+
+    unsigned i = 0;
+    for(; i < (thread_elems_cpy / vecsize); ++i)
     {
-        for(unsigned i = 0; i < ::my_min(thread_elems, len - (block_first_i + thread_elems * thread_idx)); ++i)
-        {
-            shared[thread_elems * thread_idx + i] = arr[block_first_i + thread_elems * thread_idx + i];
-        }
+        reinterpret_cast<VecType*>(&shared[(i * blockDim.x + threadIdx.x) * vecsize])[0] = reinterpret_cast<VecType*>(&arr[block_first_i + (i * blockDim.x + threadIdx.x) * vecsize])[0];
+    }
+    i *= vecsize;
+    for(; i < thread_elems_cpy; ++i) // in case it's not a multiple of 4
+    {
+        shared[i * blockDim.x + threadIdx.x] = arr[block_first_i + i * blockDim.x + threadIdx.x];
     }
 
     __syncthreads();
 
+    // shuffle shared memory access to avoid bank conflicts
+    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
+
+    const unsigned thread_elems = (block_elems + blockDim.x - 1) / blockDim.x;
+    const unsigned thread_cmps = (thread_elems + 1) >> 1;
+
     for(unsigned pass = 0; pass < passes_to_do; ++pass)
     {
-        // step a
-        if(thread_elems >= (1 << (pass + 1))) // thread can do entire sub-problem
+        // sync if a different thread processed some of these elements last
+        if(thread_elems < (1 << (pass + 1)))
         {
-            for(unsigned k = 0; k < ((thread_elems + 1) >> 1); ++k)
-            {
-                // here, tier is within the elements this thread is responsible for
-                const unsigned tier = k >> pass;
-                const unsigned column = ::fast_mod_pow_2(k, pass);
-                const unsigned i = thread_elems * thread_idx + (tier << (pass + 1)) + column;
-                const unsigned j = thread_elems * thread_idx + ((tier + 1) << (pass + 1)) - 1 - column;
+            __syncthreads();
+        }
 
-                if((block_first_i + j) < len && shared[j] < shared[i])
-                {
-                    SWAP(shared[i], shared[j]);
-                }
+        // step a
+        for(unsigned k = thread_cmps * thread_idx; k < thread_cmps * (thread_idx + 1); ++k)
+        {
+            const unsigned i = ((k >> pass) << (pass + 1)) + ::fast_mod_pow_2(k, pass);
+            const unsigned j = (((k >> pass) + 1) << (pass + 1)) - 1 - ::fast_mod_pow_2(k, pass);
+            if((block_first_i + j) < len && shared[j] < shared[i])
+            {
+                ::swap(shared[i], shared[j]);
             }
         }
-        else
+
+        // sync if a different thread will process some of these elements next
+        if(thread_elems < (1 << (pass + 1)))
         {
-            // previous step let threads run independently, sync here now that they are dependent for the first time
-            __syncthreads();
-
-            for(unsigned k = 0; k < ((thread_elems + 1) >> 1); ++k)
-            {
-                const unsigned thread_first_idx = (thread_elems >> 1) * thread_idx;
-                // Here, tier is within the elements the block is responsible for
-                const unsigned tier = (thread_first_idx + k) >> pass;
-                const unsigned column = ::fast_mod_pow_2((thread_first_idx + k), pass);
-                const unsigned i = (tier << (pass + 1)) + column;
-                const unsigned j = ((tier + 1)  << (pass + 1)) - column - 1;
-
-                if((block_first_i + j) < len && shared[j] < shared[i])
-                {
-                    SWAP(shared[i], shared[j]);
-                }
-            }
-
             __syncthreads();
         }
 
@@ -308,16 +299,20 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
 
     __syncthreads();
 
-    if((block_first_i + thread_elems * thread_idx) < len)
+    // stop shuffling (keep global memory accesses coalesced)
+    i = 0;
+    for(; i < (thread_elems_cpy / vecsize); ++i)
     {
-        for(unsigned i = 0; i < ::my_min(thread_elems, len - (block_first_i + thread_elems * thread_idx)); ++i)
-        {
-            arr[block_first_i + thread_elems * thread_idx + i] = shared[thread_elems * thread_idx + i];
-        }
+        reinterpret_cast<VecType*>(&arr[block_first_i + (i * blockDim.x + threadIdx.x) * vecsize])[0] = reinterpret_cast<VecType*>(&shared[(i * blockDim.x + threadIdx.x) * vecsize])[0];
+    }
+    i *= vecsize;
+    for(; i < thread_elems_cpy; ++i) // in case it's not a multiple of 4
+    {
+        arr[block_first_i + i * blockDim.x + threadIdx.x] = shared[i * blockDim.x + threadIdx.x];
     }
 }
 
-template<typename T> // TODO restrict to types where the bit twiddling hacks work
+template<typename T>
 __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
 {
     cudaError_t err;
@@ -349,7 +344,7 @@ __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
     {
         std::cout << "Error in device properties call: " << cudaGetErrorString(err) << std::endl;
     }
-    const std::size_t shared_mem_space = (devprop.sharedMemPerBlockOptin - devprop.reservedSharedMemPerBlock) / 4;
+    const std::size_t shared_mem_space = (devprop.sharedMemPerBlockOptin - devprop.reservedSharedMemPerBlock) / 2;
     const std::size_t elems_per_block = ::prev_power_of_2(shared_mem_space / sizeof(T));
     const unsigned passes_shared = ::log_base_2(std::min(elems_per_block, fakelen));
     const std::size_t shared_blocks = (fakelen + elems_per_block - 1) / elems_per_block;
@@ -369,7 +364,7 @@ __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
 
     std::cout << "Done with shared memory part, moving to final passes" << std::endl;
 
-    const std::size_t threadsPerBlock = 128; // does this matter?
+    const std::size_t threadsPerBlock = 1024; // does this matter?
     // in principle we only need len/2 threads, not fakelen/2, but it would require some logic changes to skip some values of idx.
     // Maybe a feature to add later.
     const std::size_t n_blocks = (((fakelen + 1) / 2) + threadsPerBlock - 1) / threadsPerBlock;
@@ -378,15 +373,12 @@ __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
 
     for(std::size_t pass = passes_shared; pass < ::log_base_2(fakelen); ++pass)
     {
-        // std::cout << "Starting pass " << pass << std::endl;
         bitonic_kernel_a<<<n_blocks, threadsPerBlock>>>(d_arr, pass, len);
 
         for(std::size_t subpass = 0; subpass < pass; ++subpass)
         {
-            // std::cout << "Starting subpass " << subpass << std::endl;
             if((1 << (pass - subpass)) > elems_per_block)
             {
-                // std::cout << "Running pass " << pass << " subpass " << subpass << "from global memory" << std::endl;
                 bitonic_kernel_b<<<n_blocks, threadsPerBlock>>>(d_arr, pass, subpass, len);
             }
             else
@@ -400,9 +392,7 @@ __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
                 }
                 break;
             }
-            // std::cout << "Done with subpass " << subpass << std::endl;
         }
-        // std::cout << "Done with pass " << pass << std::endl;
     }
 
     cudaMemcpy(h_arr, d_arr, arrsize, cudaMemcpyDeviceToHost);
