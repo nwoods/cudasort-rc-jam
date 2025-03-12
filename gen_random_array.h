@@ -40,4 +40,22 @@ std::array<T, len> random_array(T minimum = std::numeric_limits<T>::min(), T max
     return std::move(out);
 }
 
+// Use vector for arrays too big to live on the stack
+template<typename T, size_t len>
+requires int_for_distrib<T> || std::floating_point<T>
+std::vector<T> random_array_v(T minimum = std::numeric_limits<T>::min(), T maximum = std::numeric_limits<T>::max())
+{
+    std::mt19937 gen{std::random_device{}()};
+    typename DistType<T>::type dist(minimum, maximum);
+
+    std::vector<T> out(len);
+
+    for(size_t i = 0; i < out.size(); ++i)
+    {
+        out[i] = dist(gen);
+    }
+
+    return std::move(out);
+}
+
 #endif // header guard
