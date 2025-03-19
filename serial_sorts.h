@@ -6,6 +6,7 @@
 #include<iostream>
 #include<cassert>
 #include<concepts>
+#include<cstring>
 
 
 namespace
@@ -100,6 +101,86 @@ void bitonic_sort_serial(T* in, T* out, size_t len)
     std::copy(in, in + len, out);
 
     bitonic_sort_serial<T>(out, len);
+}
+
+template<typename T>
+void merge_uneven_sorted_subarrays(T* in, T* out, size_t len1, size_t len2)
+{
+    T* a = in;
+    T* a_end = a + len1;
+    T* b = a_end;
+    T* b_end = a_end + len2;
+    T* o = out;
+    while(a < a_end && b < b_end)
+    {
+        if((*a) < (*b))
+        {
+            *(o++) = *(a++);
+        }
+        else
+        {
+            *(o++) = *(b++);
+        }
+    }
+
+    if(a < a_end)
+    {
+        std::copy(a, a_end, o);
+    }
+    else if(b < b_end)
+    {
+        std::copy(b, b_end, o);
+    }
+}
+
+// given an array in where subarrays 0-len/2 and len/2-len are sorted, place the fully sorted array in out
+template<typename T>
+void merge_sorted_subarrays(T* in, T* out, size_t len)
+{
+    merge_uneven_sorted_subarrays(in, out, len / 2, (len + 1) / 2);
+}
+
+// assumes arrays are already allocated
+template<typename T>
+void merge_sort_serial_recursive_impl(T* in, T* out, size_t len)
+{
+    if(len < 2) return;
+
+    merge_sort_serial_recursive_impl(out, in, len / 2);
+    merge_sort_serial_recursive_impl(out + (len / 2), in + (len / 2), (len + 1) / 2);
+    merge_sorted_subarrays(in, out, len);
+}
+
+// assumes arrays are already allocated
+template<typename T>
+void merge_sort_serial_recursive(T* arr, T* workspace, size_t len)
+{
+    std::copy(arr, arr + len, workspace);
+    merge_sort_serial_recursive_impl(workspace, arr, len);
+}
+
+template<typename T>
+void merge_sort_serial_iterative(T* arr, T* workspace, size_t len)
+{
+    T* a = arr;
+    T* b = workspace;
+
+    for(size_t width = 1; width < len; width *= 2)
+    {
+        for(size_t i = 0; i < len; i += 2 * width)
+        {
+            const size_t len1 = std::min(width, len - i);
+            const size_t len2 = std::min(width, len - (i + len1));
+            merge_uneven_sorted_subarrays(a + i, b + i, len1, len2);
+        }
+
+        std::swap(a, b);
+    }
+
+    if(a != arr)
+    {
+        std::copy(a, a + len, arr);
+    }
 }
 
 #endif // header guard
