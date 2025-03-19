@@ -183,4 +183,83 @@ void merge_sort_serial_iterative(T* arr, T* workspace, size_t len)
     }
 }
 
+template<typename T>
+void merge_with_interior_buffer(T* arr, size_t len1, size_t len_buf, size_t len2)
+{
+    T* a = arr;
+    T* a_end = arr + len1;
+    T* b = arr + len1 + len_buf;
+    T* b_end = b + len2;
+    T* buf = arr + len_buf; // counter-intuitive, but fixes an off-by-one error
+
+    while(a < a_end && b < b_end)
+    {
+        if((*a) < (*b))
+        {
+            std::swap(*(a++), *(buf++));
+        }
+        else
+        {
+            std::swap(*(b++), *(buf++));
+        }
+    }
+
+    if(a < a_end) std::swap_ranges(a, a_end, buf);
+}
+
+template<typename T>
+void merge_sort_serial_inplace(T* arr, size_t len)
+{
+    if(len <= 1) return;
+    if(len == 2)
+    {
+        if(arr[1] < arr[0]) std::swap(arr[0], arr[1]);
+        return;
+    }
+    if(len == 3) // insertion sort if trivial
+    {
+        if(arr[2] < arr[1]) std::swap(arr[1], arr[2]);
+        if(arr[1] < arr[0])
+        {
+            std::swap(arr[0], arr[1]);
+            if(arr[2] < arr[1]) std::swap(arr[1], arr[2]);
+        }
+        return;
+    }
+
+    size_t len1 = len / 4;
+    size_t len_buf = (len + 2) / 4;
+    size_t len2 = (len + 1) / 2;
+
+    merge_sort_serial_inplace(arr + len1 + len_buf, len2);
+
+    while(len_buf > 1)
+    {
+        merge_sort_serial_inplace(arr, len1);
+        merge_with_interior_buffer(arr, len1, len_buf, len2);
+
+        len2 += len1;
+        len1 = len_buf / 2;
+        len_buf = (len_buf + 1) / 2;
+    }
+
+    // insertion sort the last item or 2
+    size_t i = 2;
+    while(i < len && arr[i] < arr[1]) ++i;
+    if(i > 2)
+    {
+        T tmp = arr[1];
+        std::copy(&arr[2], &arr[i], &arr[1]);
+        arr[i - 1] = tmp;
+    }
+    i = 1;
+    while(i < len && arr[i] < arr[0]) ++i;
+    if(i > 1)
+    {
+        T tmp = arr[0];
+        std::copy(&arr[1], &arr[i], &arr[0]);
+        arr[i - 1] = tmp;
+    }
+}
+
 #endif // header guard

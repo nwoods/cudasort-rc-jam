@@ -24,7 +24,7 @@ void verify(const auto& arr)
     }
 }
 
-constexpr size_t len = 200;
+constexpr size_t len = 500;
 
 int main()
 {
@@ -33,10 +33,12 @@ int main()
     std::cout << "Unsorted input array: " << std::endl;
     print_array(arr);
 
-    std::array<uint32_t, len> workspace;
 
+    // std::array<uint32_t, len> workspace;
     // merge_sort_serial_recursive(arr.data(), workspace.data(), arr.size());
-    merge_sort_serial_iterative(arr.data(), workspace.data(), arr.size());
+    // merge_sort_serial_iterative(arr.data(), workspace.data(), arr.size());
+
+    merge_sort_serial_inplace(arr.data(), arr.size());
 
     std::cout << "Sorted output array: " << std::endl;
     print_array(arr);
