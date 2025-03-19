@@ -1,108 +1,13 @@
 #ifndef CUDASORT_RC_JAM_BITONIC__
 #define CUDASORT_RC_JAM_BITONIC__
 
-#include<concepts>
 #include<cstring>
 
 #include<iostream>
 
 #include "vec_typedefs.hpp"
+#include "utils.hpp"
 
-
-namespace
-{
-    template<std::unsigned_integral T>
-    T next_power_of_2(T x)
-    {
-        x--;
-        std::size_t shift = 1;
-        while(shift < (sizeof(T) * 8))
-        {
-            x |= (x >> shift);
-            shift <<= 1;
-        }
-        return ++x;
-    }
-
-    template<std::unsigned_integral T>
-    unsigned log_base_2(T x)
-    {
-        unsigned shift = 0;
-        while(x > 1)
-        {
-            x >>= 1;
-            ++shift;
-        }
-        return shift;
-    }
-
-    template<std::unsigned_integral T>
-    T prev_power_of_2(T x)
-    {
-        return 1 << log_base_2(x);
-    }
-
-    // fast computation of x % (2^n)
-    template<std::unsigned_integral T>
-    __device__ inline T fast_mod_pow_2(T x, unsigned n)
-    {
-        return x & ((1 << n) - 1);
-    }
-
-    // As above but you give it a number assumed to be a power of 2 instead of the exponent
-    template<std::unsigned_integral T>
-    __device__ inline T fast_mod_known_pow_2(T x, T m)
-    {
-        return x & (m - 1);
-    }
-
-    // x / d assuming d is a power of 2
-    template<std::unsigned_integral T>
-    __device__ inline T fast_div_known_pow_2(T x, T d)
-    {
-        while(d && x)
-        {
-            d >>= 1;
-            x >>= 1;
-        }
-
-        return x;
-    }
-
-    template<std::integral T>
-    __device__ inline bool is_pow_2(T x)
-    {
-        return bool(x) && !bool(x & (x - 1));
-    }
-
-    template<typename T>
-    __device__ T my_min(T a, T b)
-    {
-        return a < b ? a : b;
-    }
-
-    // shuffle thread indices 32 ways within a block so threads in the same warp will almost never try to access nearby memory
-    // Only works if blocksize is a power of 2 (otherwise leaves index unchangede)
-    __device__ int thread_index_shuffle(unsigned threadidx, unsigned blocksize)
-    {
-        const unsigned warpsize = 32;
-
-        if(blocksize < warpsize || !is_pow_2(blocksize))
-        {
-            return threadidx;
-        }
-
-        return fast_mod_known_pow_2(threadidx + fast_mod_known_pow_2(threadidx, warpsize) * (fast_div_known_pow_2(blocksize, warpsize)), blocksize);
-    }
-
-    template<typename T>
-    __device__ void swap(T& a, T& b)
-    {
-        T tmp = a;
-        a = b;
-        b = tmp;
-    }
-} // anonymous namespace
 
 template<typename T>
 __global__ void bitonic_kernel_a(T* arr, std::size_t pass, std::size_t len)
@@ -110,12 +15,12 @@ __global__ void bitonic_kernel_a(T* arr, std::size_t pass, std::size_t len)
     const std::size_t idx = blockDim.x * blockIdx.x + threadIdx.x;
     // i = idx // 2^k * 2^(k+1) + idx % k where k=pass
     // note idx//2^k * 2^(k+1) != 2*idx because integer division is floored
-    const std::size_t i = ((idx >> pass) << (pass + 1)) + ::fast_mod_pow_2(idx, pass);
-    const std::size_t j = ((idx >> pass) << (pass + 1)) + (1 << (pass + 1)) - ::fast_mod_pow_2(idx, pass) - 1;
+    const std::size_t i = ((idx >> pass) << (pass + 1)) + utils::fast_mod_pow_2(idx, pass);
+    const std::size_t j = ((idx >> pass) << (pass + 1)) + (1 << (pass + 1)) - utils::fast_mod_pow_2(idx, pass) - 1;
 
     if(j < len && arr[j] < arr[i])
     {
-        ::swap(arr[i], arr[j]);
+        utils::swap(arr[i], arr[j]);
     }
 }
 
@@ -124,19 +29,19 @@ __global__ void bitonic_kernel_b(T* arr, std::size_t pass, std::size_t subpass, 
 {
     const std::size_t idx = blockDim.x * blockIdx.x + threadIdx.x;
     // i = idx // 2^k * 2^(k+1) + idx % k where k=(pass-subpass)
-    const std::size_t i = ((idx >> (pass - subpass - 1)) << (pass - subpass)) + ::fast_mod_pow_2(idx, pass - subpass - 1);
+    const std::size_t i = ((idx >> (pass - subpass - 1)) << (pass - subpass)) + utils::fast_mod_pow_2(idx, pass - subpass - 1);
     const std::size_t j = i + (1 << (pass - subpass - 1));
 
     if(j < len && arr[j] < arr[i])
     {
-        ::swap(arr[i], arr[j]);
+        utils::swap(arr[i], arr[j]);
     }
 }
 
 template<typename T>
 __host__ void bitonic_sort_gpu(T* h_arr, std::size_t len)
 {
-    const std::size_t fakelen = ::next_power_of_2(len);
+    const std::size_t fakelen = utils::next_power_of_2(len);
 
     T* d_arr;
     const std::size_t arrsize = len * sizeof(T);
@@ -168,7 +73,7 @@ template<typename T>
 __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned pass, unsigned first_subpass, std::size_t len)
 {
     // const unsigned block_elems = 1 << (pass - first_subpass);
-    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
+    const unsigned thread_idx = utils::thread_index_shuffle(threadIdx.x, blockDim.x);
     const unsigned block_first_i = block_elems * blockIdx.x;
     const unsigned thread_elems = (block_elems + blockDim.x - 1) / blockDim.x;
     const unsigned thread_cmps = (thread_elems + 1) >> 1;
@@ -177,12 +82,12 @@ __device__ void bitonic_step_b_shared(T* shared, unsigned block_elems, unsigned 
     {
         for(unsigned k = thread_cmps * thread_idx; k < thread_cmps * (thread_idx + 1); ++k)
         {
-            const unsigned i = ((k >> (pass - subpass - 1)) << (pass - subpass)) + ::fast_mod_pow_2(k, pass - subpass - 1);
+            const unsigned i = ((k >> (pass - subpass - 1)) << (pass - subpass)) + utils::fast_mod_pow_2(k, pass - subpass - 1);
             const unsigned j = i + (1 << (pass - subpass - 1));
 
             if((block_first_i + j) < len && shared[j] < shared[i])
             {
-                ::swap(shared[i], shared[j]);
+                utils::swap(shared[i], shared[j]);
             }
         }
 
@@ -264,7 +169,7 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
     __syncthreads();
 
     // shuffle shared memory access to avoid bank conflicts
-    const unsigned thread_idx = ::thread_index_shuffle(threadIdx.x, blockDim.x);
+    const unsigned thread_idx = utils::thread_index_shuffle(threadIdx.x, blockDim.x);
 
     const unsigned thread_elems = (block_elems + blockDim.x - 1) / blockDim.x;
     const unsigned thread_cmps = (thread_elems + 1) >> 1;
@@ -280,11 +185,11 @@ __global__ void bitonic_kernel_shared(T* arr, unsigned passes_to_do, unsigned le
         // step a
         for(unsigned k = thread_cmps * thread_idx; k < thread_cmps * (thread_idx + 1); ++k)
         {
-            const unsigned i = ((k >> pass) << (pass + 1)) + ::fast_mod_pow_2(k, pass);
-            const unsigned j = (((k >> pass) + 1) << (pass + 1)) - 1 - ::fast_mod_pow_2(k, pass);
+            const unsigned i = ((k >> pass) << (pass + 1)) + utils::fast_mod_pow_2(k, pass);
+            const unsigned j = (((k >> pass) + 1) << (pass + 1)) - 1 - utils::fast_mod_pow_2(k, pass);
             if((block_first_i + j) < len && shared[j] < shared[i])
             {
-                ::swap(shared[i], shared[j]);
+                utils::swap(shared[i], shared[j]);
             }
         }
 
@@ -316,7 +221,7 @@ template<typename T>
 __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
 {
     cudaError_t err;
-    const std::size_t fakelen = ::next_power_of_2(len);
+    const std::size_t fakelen = utils::next_power_of_2(len);
 
     T* d_arr;
     const std::size_t arrsize = len * sizeof(T);
@@ -345,8 +250,8 @@ __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
         std::cout << "Error in device properties call: " << cudaGetErrorString(err) << std::endl;
     }
     const std::size_t shared_mem_space = (devprop.sharedMemPerBlockOptin - devprop.reservedSharedMemPerBlock) / 2;
-    const std::size_t elems_per_block = ::prev_power_of_2(shared_mem_space / sizeof(T));
-    const unsigned passes_shared = ::log_base_2(std::min(elems_per_block, fakelen));
+    const std::size_t elems_per_block = utils::prev_power_of_2(shared_mem_space / sizeof(T));
+    const unsigned passes_shared = utils::log_base_2(std::min(elems_per_block, fakelen));
     const std::size_t shared_blocks = (fakelen + elems_per_block - 1) / elems_per_block;
     cudaFuncSetAttribute(bitonic_kernel_shared<T>, cudaFuncAttribute::cudaFuncAttributeMaxDynamicSharedMemorySize, shared_mem_space);
     cudaFuncSetAttribute(finish_bitonic_step_b_shared<T>, cudaFuncAttribute::cudaFuncAttributeMaxDynamicSharedMemorySize, shared_mem_space);
@@ -369,9 +274,9 @@ __host__ void bitonic_sort_shared(T* h_arr, std::size_t len)
     // Maybe a feature to add later.
     const std::size_t n_blocks = (((fakelen + 1) / 2) + threadsPerBlock - 1) / threadsPerBlock;
 
-    std::cout << "Running passes " << passes_shared << " to " << ::log_base_2(fakelen)-1 << std::endl;
+    std::cout << "Running passes " << passes_shared << " to " << utils::log_base_2(fakelen)-1 << std::endl;
 
-    for(std::size_t pass = passes_shared; pass < ::log_base_2(fakelen); ++pass)
+    for(std::size_t pass = passes_shared; pass < utils::log_base_2(fakelen); ++pass)
     {
         bitonic_kernel_a<<<n_blocks, threadsPerBlock>>>(d_arr, pass, len);
 
