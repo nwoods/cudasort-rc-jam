@@ -92,6 +92,8 @@ __device__ int thread_index_shuffle(unsigned threadidx, unsigned blocksize)
 template<typename T>
 __device__ void swap(T& a, T& b)
 {
+    // I still don't completely understand when the compiler does or does not optimize out this temporary
+    // TODO: under certain circumstances, bitwise in-place swap may be better (https://graphics.stanford.edu/~seander/bithacks.html#SwappingValuesXOR)
     T tmp = a;
     a = b;
     b = tmp;
