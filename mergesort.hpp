@@ -132,9 +132,6 @@ __global__ void merge_sort_buffered_global(T* in, T* out, unsigned len, unsigned
     if(i >= len) return;
     const unsigned len1 = utils::my_min(width, len - i);
     const unsigned len2 = utils::my_min(width, len - (i + len1));
-    // printf("Thread %u merging 2 arrays of lengths %u and %u\n", idx, len1, len2);
-    // _verify(in, 0, len1);
-    // _verify(in, len1, len1 + len2);
     merge_uneven_sorted_subarrays(in + i, out + i, len1, len2);
 }
 
@@ -205,15 +202,6 @@ __host__ void merge_sort_gpu_buffered(T* h_arr, std::size_t len)
         std::cout << "Error in kernel: " << cudaGetErrorString(err) << std::endl;
     }
 
-    // for(unsigned i = 0; i < len; i += max_shared_items)
-    // {
-    //     __verify<<<1,1>>>(d_arr, i, i + max_shared_items / 2);
-    //     __verify<<<1,1>>>(d_arr, i + max_shared_items / 2, i + max_shared_items);
-    // }
-    // __verify<<<1,1>>>(d_arr, 0, len / 2);
-    // __verify<<<1,1>>>(d_arr, len / 2, len);
-    // std::cout << "Mid verified" << std::endl;
-
     T* d_ret_from = d_arr;
     T* d_a = d_arr;
 
@@ -234,8 +222,6 @@ __host__ void merge_sort_gpu_buffered(T* h_arr, std::size_t len)
         const unsigned items_per_merge = (1u << (level + 1));
         const unsigned threads_needed = (len + items_per_merge - 1) / items_per_merge;
         const unsigned blocks_needed = (threads_needed + threads_per_block - 1) / threads_per_block;
-        // std::cout << "Global level " << level << " :: items_per_merge: " << items_per_merge << ", threads_needed: " << threads_needed << ", blocks_needed: " << blocks_needed << std::endl;
-        // std::cout << "Writing from " << d_ret_from << " to " << d_a << std::endl;
         merge_sort_buffered_global<<<blocks_needed, threads_per_block>>>(d_ret_from, d_a, len, level);
 
         err = cudaGetLastError();
@@ -244,22 +230,10 @@ __host__ void merge_sort_gpu_buffered(T* h_arr, std::size_t len)
             std::cout << "Error in global kernel (level " << level << "): " << cudaGetErrorString(err) << std::endl;
         }
 
-        // for(unsigned i = 0; i < len; i += items_per_merge)
-        // {
-        //     __verify<<<1,1>>>(d_a, i, i + items_per_merge);
-        // }
-
         std::swap(d_a, d_ret_from);
-        // std::cout << "if done, will copy back from " << d_ret_from << std::endl;
     }
 
-    // std::cout << "Copying back from " << d_ret_from << std::endl;
-
-    // __verify<<<1,1>>>(d_ret_from, 0, len);
-
     cudaMemcpy(h_arr, d_ret_from, arrsize, cudaMemcpyDeviceToHost);
-
-    // verify_(h_arr, len);
 
     err = cudaGetLastError();
     if(err != cudaSuccess)
