@@ -2,6 +2,8 @@
 
 #include<concepts>
 
+#include "vec_typedefs.hpp"
+
 namespace utils
 {
 
@@ -97,6 +99,30 @@ __device__ void swap(T& a, T& b)
     T tmp = a;
     a = b;
     b = tmp;
+}
+
+// Use whole block to copy
+// E.g. for global->shared or vice versa
+template<typename T>
+__device__ void vectorized_block_copy(T* dest, T* src, unsigned len)
+{
+    constexpr unsigned vecsize = 4;
+    typedef typename Vec_t<T, static_cast<std::size_t>(vecsize)>::type VecType;
+
+    const unsigned thread_idx = threadIdx.x;
+    const unsigned n_threads = blockDim.x;
+    const unsigned thread_elems = (len / n_threads) + (thread_idx < (len % n_threads) ? 1u : 0u);
+
+    unsigned i = 0;
+    for(; i < (thread_elems / vecsize); ++i)
+    {
+        reinterpret_cast<VecType*>(&dest[(i * n_threads + thread_idx) * vecsize])[0] = reinterpret_cast<VecType*>(&src[(i * n_threads + thread_idx) * vecsize])[0];
+    }
+    i *= vecsize;
+    for(; i < thread_elems; ++i) // in case it's not a multiple of 4
+    {
+        dest[i * n_threads + thread_idx] = src[i * n_threads + thread_idx];
+    }
 }
 
 }

@@ -4,7 +4,6 @@
 
 #include<assert.h>
 
-#include "vec_typedefs.hpp"
 #include "utils.hpp"
 
 
@@ -96,6 +95,8 @@ __device__ void merge_sort_buffered(T* arr, T* workspace, unsigned len, unsigned
     }
 }
 
+// First levels iterations of a bottom-up merge sort
+// For subproblems that fit fully in shared memory including a workspace buffer
 // in and out may be the same
 template<typename T>
 __global__ void merge_sort_buffered_shared(T* in, T* out, unsigned len, unsigned levels)
@@ -106,56 +107,29 @@ __global__ void merge_sort_buffered_shared(T* in, T* out, unsigned len, unsigned
     T* a = shared;
     T* b = shared + block_elems;
 
-    const unsigned thread_idx = threadIdx.x;
-
     const unsigned block_first_i = block_elems * blockIdx.x;
-    const unsigned thread_elems_cpy = block_elems / blockDim.x + (thread_idx < (block_elems % blockDim.x) ? 1u : 0u);
 
-    constexpr std::size_t vecsize = 4;
-
-    typedef typename Vec_t<T, vecsize>::type VecType;
-
-    unsigned i_cpy = 0;
-    for(; i_cpy < (thread_elems_cpy / vecsize); ++i_cpy)
-    {
-        reinterpret_cast<VecType*>(&a[(i_cpy * blockDim.x + thread_idx) * vecsize])[0] = reinterpret_cast<VecType*>(&in[block_first_i + (i_cpy * blockDim.x + thread_idx) * vecsize])[0];
-    }
-    i_cpy *= vecsize;
-    for(; i_cpy < thread_elems_cpy; ++i_cpy) // in case it's not a multiple of 4
-    {
-        a[i_cpy * blockDim.x + thread_idx] = in[block_first_i + i_cpy * blockDim.x + thread_idx];
-    }
+    utils::vectorized_block_copy(a, in + block_first_i, block_elems);
 
     __syncthreads();
 
-    // 2 options:
-    //     - Maximize parallelism with something like
-    //         for(unsigned i = 2 * width * thread_idx; i < block_elems; i += 2 * width * blockDim.x)
-    //       (with thread_idx swizzled to reduce bank conflicts)
-    //     - Avoid __syncthreads() calls by letting each thread do all levels on 2^levels items
-    // We'll do the second option here but there might be situations where the first is better
+    const unsigned thread_idx = utils::thread_index_shuffle(threadIdx.x, blockDim.x);
 
-    const unsigned thread_idx_swiz = utils::thread_index_shuffle(thread_idx, blockDim.x);
-
-    const unsigned i = (1u << levels) * thread_idx_swiz;
-    if((block_first_i + i) < len && i < block_elems)
+    for(unsigned level = 0; level < levels; ++level)
     {
-        merge_sort_buffered(a + i, b + i, utils::min((1u << levels), utils::min(block_elems - i, len - (block_first_i + i))), levels);
-    }
-    if(utils::fast_mod_pow_2(levels, 1)) utils::swap(a, b);
+        const unsigned width = 1u << level;
+        for(unsigned i = 2 * width * thread_idx; i < block_elems; i += 2 * width * blockDim.x)
+        {
+            const unsigned len1 = utils::min(width, len - (block_first_i + i));
+            const unsigned len2 = utils::min(width, len - (block_first_i + i + len1));
+            merge_uneven_sorted_subarrays(a + i, b + i, len1, len2);
+        }
 
-    __syncthreads();
+        __syncthreads();
+        utils::swap(a, b);
+    }
 
-    i_cpy = 0;
-    for(; i_cpy < (thread_elems_cpy / vecsize); ++i_cpy)
-    {
-        reinterpret_cast<VecType*>(&out[block_first_i + (i_cpy * blockDim.x + thread_idx) * vecsize])[0] = reinterpret_cast<VecType*>(&a[(i_cpy * blockDim.x + thread_idx) * vecsize])[0];
-    }
-    i_cpy *= vecsize;
-    for(; i_cpy < thread_elems_cpy; ++i_cpy) // in case it's not a multiple of 4
-    {
-        out[block_first_i + i_cpy * blockDim.x + thread_idx] = a[i_cpy * blockDim.x + thread_idx];
-    }
+    utils::vectorized_block_copy(out + block_first_i, a, block_elems);
 }
 
 template<typename T>
@@ -300,6 +274,8 @@ __host__ void merge_sort_gpu_buffered(T* h_arr, std::size_t len)
     if(err != cudaSuccess)
     {
         std::cout << "Error in copy back: " << cudaGetErrorString(err) << std::endl;
+
+
     }
 
     cudaFree(d_arr);
