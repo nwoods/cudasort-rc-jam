@@ -262,4 +262,123 @@ void merge_sort_serial_inplace(T* arr, size_t len)
     }
 }
 
+template<typename T>
+void print_array(const T* arr, size_t len)
+{
+    std::cout << "[" << arr[0];
+    for(size_t i = 1; i < len; ++i)
+    {
+        std::cout << ", " << arr[i];
+    }
+    std::cout << "]" << std::endl;
+}
+
+template<typename T>
+void path_merge_sorted_subarrays(T* in, T* out, size_t len1, size_t len2, size_t n_per_thread)
+{
+    if(len2 == 0)
+    {
+        std::copy(in, in + len1, out);
+        return;
+    }
+
+    if(len1 + len2 <= n_per_thread)
+    {
+        merge_uneven_sorted_subarrays(in, out, len1, len2);
+        return;
+    }
+
+    T* a = in;
+    T* a_end = a + len1;
+    T* b = a_end;
+    T* b_end = a_end + len2;
+
+    for(size_t i_thread = 0; i_thread < (len1 + len2 + n_per_thread - 1) / n_per_thread; ++i_thread)
+    {
+        T* o_start = out + i_thread * n_per_thread;
+        T *ai, *bi;
+        if(i_thread == 0)
+        {
+            ai = a;
+            bi = b;
+        }
+        else
+        {
+            T *a_lo, *a_hi, *b_hi;
+            const size_t diag = (i_thread) * n_per_thread;
+            if(a + diag < a_end)
+            {
+                a_hi = a + diag;
+                b_hi = b;
+                a_lo = a;
+            }
+            else
+            {
+                a_hi = a_end;
+                b_hi = b + diag - len1;
+                a_lo = a + diag - len1;
+            }
+
+            size_t n_iter = 0;
+            while(true)
+            {
+                ++n_iter;
+                const long offset = (a_hi - a_lo) / 2;
+                ai = a_hi - offset;
+                bi = b_hi + offset;
+                if(bi == b || ai >= a_end || *ai > *(bi - 1))
+                {
+                    if(ai == a || bi >= b_end || *(ai - 1) <= *bi)
+                    {
+                        break;
+                    }
+                    a_hi = ai - 1;
+                    b_hi = bi + 1;
+                }
+                else
+                {
+                    a_lo = ai + 1;
+                }
+            }
+        }
+
+        T* o = o_start;
+        while(o < (o_start + n_per_thread) && o < out + len1 + len2)
+        {
+            if(ai >= a_end || (bi < b_end && (*ai) > (*bi)))
+            {
+                *(o++) = *(bi++);
+            }
+            else
+            {
+                *(o++) = *(ai++);
+            }
+        }
+    }
+}
+
+template<typename T>
+void path_merge_sort_serial_iterative(T* arr, T* workspace, size_t len, size_t n_per_thread)
+{
+    T* a = arr;
+    T* b = workspace;
+
+    for(size_t width = 1; width < len; width *= 2)
+    {
+        for(size_t i = 0; i < len; i += 2 * width)
+        {
+            const size_t len1 = std::min(width, len - i);
+            const size_t len2 = std::min(width, len - (i + len1));
+            path_merge_sorted_subarrays(a + i, b + i, len1, len2, n_per_thread);
+        }
+
+        std::swap(a, b);
+    }
+
+    if(a != arr)
+    {
+        std::copy(a, a + len, arr);
+    }
+}
+
 #endif // header guard

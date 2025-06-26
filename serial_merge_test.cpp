@@ -34,11 +34,13 @@ int main()
     print_array(arr);
 
 
-    // std::array<uint32_t, len> workspace;
+    std::array<uint32_t, len> workspace;
     // merge_sort_serial_recursive(arr.data(), workspace.data(), arr.size());
     // merge_sort_serial_iterative(arr.data(), workspace.data(), arr.size());
 
-    merge_sort_serial_inplace(arr.data(), arr.size());
+    // merge_sort_serial_inplace(arr.data(), arr.size());
+
+    path_merge_sort_serial_iterative(arr.data(), workspace.data(), len, 32);
 
     std::cout << "Sorted output array: " << std::endl;
     print_array(arr);

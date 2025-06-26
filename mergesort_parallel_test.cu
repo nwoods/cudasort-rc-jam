@@ -42,11 +42,11 @@ void verify(const auto& arr)
     }
 }
 
-constexpr size_t len = 1u << 25; // (1 << 28);
+constexpr size_t len = 1u << 24; // (1 << 28);
 
 int main()
 {
-    std::vector<unsigned> arr = random_array_v<unsigned, len>(0, 500.);
+    std::vector<unsigned> arr = random_array_v<unsigned, len>(0, 999999.);
 
     if(len <= 1024)
     {

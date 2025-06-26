@@ -70,7 +70,7 @@ __device__ inline bool is_pow_2(T x)
 }
 
 template<typename T>
-__device__ T my_min(T a, T b)
+__device__ T min(T a, T b)
 {
     return a < b ? a : b;
 }
