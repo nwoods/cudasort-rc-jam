@@ -8,7 +8,7 @@ namespace utils
 {
 
 template<std::unsigned_integral T>
-T next_power_of_2(T x)
+__host__ __device__ T next_power_of_2(T x)
 {
     x--;
     std::size_t shift = 1;
@@ -21,7 +21,7 @@ T next_power_of_2(T x)
 }
 
 template<std::unsigned_integral T>
-unsigned log_base_2(T x)
+__host__ __device__ unsigned log_base_2(T x)
 {
     unsigned shift = 0;
     while(x > 1)
@@ -33,7 +33,7 @@ unsigned log_base_2(T x)
 }
 
 template<std::unsigned_integral T>
-T prev_power_of_2(T x)
+__host__ __device__ T prev_power_of_2(T x)
 {
     return 1 << log_base_2(x);
 }
@@ -104,7 +104,7 @@ __device__ void swap(T& a, T& b)
 // Use whole block to copy
 // E.g. for global->shared or vice versa
 template<typename T>
-__device__ void vectorized_block_copy(T* dest, T* src, unsigned len)
+__device__ void _vectorized_block_copy(T* dest, T* src, unsigned len)
 {
     constexpr unsigned vecsize = 4;
     typedef typename Vec_t<T, static_cast<std::size_t>(vecsize)>::type VecType;
@@ -122,6 +122,36 @@ __device__ void vectorized_block_copy(T* dest, T* src, unsigned len)
     for(; i < thread_elems; ++i) // in case it's not a multiple of 4
     {
         dest[i * n_threads + thread_idx] = src[i * n_threads + thread_idx];
+    }
+}
+
+// Use whole block to copy
+// E.g. for global->shared or vice versa
+template<typename T>
+__device__ void vectorized_block_copy(T* dest, T* src, unsigned len)
+{
+    constexpr unsigned vecsize = 4;
+    typedef typename Vec_t<T, static_cast<std::size_t>(vecsize)>::type VecType;
+
+    const unsigned thread_idx = threadIdx.x;
+    const unsigned n_threads = blockDim.x;
+
+    unsigned i = thread_idx * vecsize;
+    for(; i + vecsize <= len; i += n_threads * vecsize)
+    {
+        if(reinterpret_cast<std::size_t>(dest + i) % (vecsize * sizeof(T)))
+        {
+            printf("Thread %u trying bad write of size %u with offset %u", threadIdx.x, vecsize * static_cast<unsigned>(sizeof(T)), i);
+        }
+        reinterpret_cast<VecType*>(&dest[i])[0] = reinterpret_cast<VecType*>(&src[i])[0];
+    }
+    for(; i < len; ++i) // in case it's not a multiple of 4
+    {
+        if(reinterpret_cast<std::size_t>(dest + i) % (sizeof(T)))
+        {
+            printf("Thread %u trying bad write of size %u with offset %u", threadIdx.x, static_cast<unsigned>(sizeof(T)), i);
+        }
+        dest[i] = src[i];
     }
 }
 

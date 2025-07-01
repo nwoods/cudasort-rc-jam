@@ -24,11 +24,12 @@ void verify(const auto& arr)
     }
 }
 
-constexpr size_t len = 500;
+constexpr size_t len = 17; // 500;
 
 int main()
 {
-    std::array<uint32_t, len> arr = random_array<uint32_t, len>(0, 500);
+    // std::array<uint32_t, len> arr = random_array<uint32_t, len>(0, 500);
+    std::array<uint32_t, 17> arr = {433, 482, 325, 118, 148, 200, 76, 410, 412, 368, 451, 326, 185, 355, 121, 445, 357};
 
     std::cout << "Unsorted input array: " << std::endl;
     print_array(arr);
@@ -40,7 +41,7 @@ int main()
 
     // merge_sort_serial_inplace(arr.data(), arr.size());
 
-    path_merge_sort_serial_iterative(arr.data(), workspace.data(), len, 32);
+    path_merge_sort_serial_iterative(arr.data(), workspace.data(), len, 16);
 
     std::cout << "Sorted output array: " << std::endl;
     print_array(arr);

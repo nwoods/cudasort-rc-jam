@@ -326,9 +326,11 @@ void path_merge_sorted_subarrays(T* in, T* out, size_t len1, size_t len2, size_t
                 const long offset = (a_hi - a_lo) / 2;
                 ai = a_hi - offset;
                 bi = b_hi + offset;
-                if(bi == b || ai >= a_end || *ai > *(bi - 1))
+                // if((ai < a_end ? (ai >= a ? *ai : std::numeric_limits<T>::min()) : std::numeric_limits<T>::max()) > (bi <= b_end ? (bi > b ? *(bi - 1) : std::numeric_limits<T>::min()) : std::numeric_limits<T>::max()))
+                if(bi == b || ai >= a_end || (bi <= b_end && *ai > *(bi - 1)))
                 {
-                    if(ai == a || bi >= b_end || *(ai - 1) <= *bi)
+                    // if((ai <= a_end ? (ai > a ? *(ai - 1) : std::numeric_limits<T>::min()) : std::numeric_limits<T>::max()) <= (bi < b_end ? (bi >= b ? *bi : std::numeric_limits<T>::min()) : std::numeric_limits<T>::max()))
+                    if(ai == a || bi >= b_end || (*(ai - 1) <= *bi))
                     {
                         break;
                     }

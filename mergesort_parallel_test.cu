@@ -42,11 +42,12 @@ void verify(const auto& arr)
     }
 }
 
-constexpr size_t len = 1u << 24; // (1 << 28);
+constexpr size_t len = (1u << 20); // (1 << 28);
+using DataType = unsigned;
 
 int main()
 {
-    std::vector<unsigned> arr = random_array_v<unsigned, len>(0, 999999.);
+    std::vector<DataType> arr = random_array_v<DataType, len>(0, 999999);
 
     if(len <= 1024)
     {
@@ -56,7 +57,8 @@ int main()
 
     auto t1 = std::chrono::high_resolution_clock::now();
 
-    merge_sort_gpu_buffered(arr.data(), len);
+    // merge_sort_gpu_buffered(arr.data(), len);
+    path_merge_sort_gpu_buffered(static_cast<DataType*>(arr.data()), len);
 
     // std::sort(arr.begin(), arr.end());
 
@@ -64,7 +66,7 @@ int main()
 
     std::cout << "Sort took " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << "ms" << std::endl;
 
-    if(len <= 1024)
+    if(len <= 2048)//1024)
     {
         std::cout << "Sorted output array: " << std::endl;
         print_array(arr);
