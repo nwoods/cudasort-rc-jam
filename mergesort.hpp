@@ -301,10 +301,19 @@ __device__ void merge_sort_buffered(T* arr, T* workspace, unsigned len, unsigned
 template<typename T>
 __device__ void find_cross_diagonals(T* arr, unsigned len1, unsigned len2, unsigned diag, T*& xdaga, T*& xdagb)
 {
+    unsigned len_a = len1;
+    unsigned len_b = len2;
     T* a = arr;
     T* a_end = a + len1;
     T* b = a_end;
     T* b_end = b + len2;
+    // simplify logic by taking the longer array to be a
+    if(len2 > len1)
+    {
+        utils::swap(a, b);
+        utils::swap(a_end, b_end);
+        utils::swap(len_a, len_b);
+    }
 
     xdaga = a;
     xdagb = b;
@@ -321,8 +330,8 @@ __device__ void find_cross_diagonals(T* arr, unsigned len1, unsigned len2, unsig
         else
         {
             a_hi = a_end;
-            b_hi = b + diag - len1;
-            a_lo = a + diag - len1;
+            b_hi = b + diag - len_a;
+            a_lo = a + diag - len_a;
         }
 
         while(true)
@@ -344,6 +353,11 @@ __device__ void find_cross_diagonals(T* arr, unsigned len1, unsigned len2, unsig
                 a_lo = xdaga + 1;
             }
         }
+    }
+
+    if(len2 > len1)
+    {
+        utils::swap(xdaga, xdagb);
     }
 }
 
@@ -496,10 +510,10 @@ __global__ void path_merge_buffered_global_shared_intermediate(T* in, T* out, un
 
     const unsigned idx_in_merge = blockIdx.x - (i_merge * blocks_per_merge);
     const unsigned merge_len = utils::min(2 * width, len - merge_start);
-    const unsigned block_len = merge_len - idx_in_merge * blockDim.x * n_per_thread;
+    const unsigned block_len = utils::min(blockDim.x * n_per_thread, merge_len - idx_in_merge * blockDim.x * n_per_thread);
     const unsigned diag1 = idx_in_merge * blockDim.x * n_per_thread;
     if(diag1 > merge_len) return;
-    T *a_start, b_start, *a_end, *b_end;
+    T *a_start, *b_start, *a_end, *b_end;
     find_cross_diagonals(in + merge_start, width, merge_len - width, diag1, a_start, b_start);
 
     const unsigned diag2 = diag1 + block_len;
@@ -527,7 +541,9 @@ __global__ void path_merge_buffered_global_shared_intermediate(T* in, T* out, un
     if(thread_diag < block_len)
     {
         T *thread_a, *thread_b;
+
         find_cross_diagonals(local_a, local_len1, local_len2, thread_diag, thread_a, thread_b);
+
         T* thread_out = local_out + threadIdx.x * n_per_thread;
         T* o = thread_out;
         while(o < (thread_out + n_per_thread) && o < local_out + block_len)
@@ -541,6 +557,7 @@ __global__ void path_merge_buffered_global_shared_intermediate(T* in, T* out, un
                 *(o++) = *(thread_a++);
             }
         }
+
     }
 
     __syncthreads();
@@ -624,15 +641,11 @@ __host__ void path_merge_sort_gpu_buffered(T* h_arr, std::size_t len)
         d_a = d_buf;
     }
 
-    const unsigned global_threads_per_block = 1024;
-    const unsigned global_threads = (len + items_per_thread - 1) / items_per_thread;
-    const unsigned global_blocks = (global_threads + global_threads_per_block - 1) / global_threads_per_block;
-
-    if(level < levels) std::cout << "Running remaining " << levels - level << " levels in global memory with " << global_blocks << " blocks of " << global_threads_per_block << " threads each" << std::endl;
+    if(level < levels) std::cout << "Running remaining " << levels - level << " levels in global memory with " << n_blocks_shared << " blocks of " << threads_per_block << " threads each and an intermediate buffer in shared memory of " << shared_mem_space << "B/block" << std::endl;
 
     for(; level < levels; ++level)
     {
-        path_merge_buffered_global<<<global_blocks, global_threads_per_block>>>(d_ret_from, d_a, len, level, items_per_thread);
+        path_merge_buffered_global_shared_intermediate<<<n_blocks_shared, threads_per_block, shared_mem_space>>>(d_ret_from, d_a, len, level, items_per_thread);
 
         err = cudaGetLastError();
         if(err != cudaSuccess)
