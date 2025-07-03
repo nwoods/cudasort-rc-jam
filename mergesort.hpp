@@ -373,7 +373,7 @@ __device__ void path_merge_step_buffered(T* in, T* out, unsigned level, unsigned
 
     T* a_end = in + merge_start + len1;
     T* b_end = a_end + len2;
-    T* o_start = out + i_thread * n_per_thread;
+    T* o_start = out + merge_start + i_thread * n_per_thread;
     T *ai, *bi;
     find_cross_diagonals(in + merge_start, len1, len2, diag, ai, bi);
 
