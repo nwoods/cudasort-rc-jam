@@ -542,7 +542,7 @@ __host__ void path_merge_sort_gpu_buffered(T* h_arr, std::size_t len)
 
     for(; level < levels; ++level)
     {
-        merge_sort_buffered_global<<<global_blocks, global_threads_per_block>>>(d_ret_from, d_a, len, level);
+        path_merge_buffered_global<<<global_blocks, global_threads_per_block>>>(d_ret_from, d_a, len, level, items_per_thread);
 
         err = cudaGetLastError();
         if(err != cudaSuccess)

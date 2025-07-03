@@ -42,7 +42,7 @@ void verify(const auto& arr)
     }
 }
 
-constexpr size_t len = (1u << 20); // (1 << 28);
+constexpr size_t len = (1u << 27); // (1 << 28);
 using DataType = unsigned;
 
 int main()
