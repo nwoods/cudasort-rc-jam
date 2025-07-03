@@ -298,6 +298,55 @@ __device__ void merge_sort_buffered(T* arr, T* workspace, unsigned len, unsigned
 // Version based on merge paths (https://arxiv.org/pdf/1406.2628) for better parallelization.
 // Buffered.
 
+template<typename T>
+__device__ void find_cross_diagonals(T* arr, unsigned len1, unsigned len2, unsigned diag, T*& xdaga, T*& xdagb)
+{
+    T* a = arr;
+    T* a_end = a + len1;
+    T* b = a_end;
+    T* b_end = b + len2;
+
+    xdaga = a;
+    xdagb = b;
+
+    if(diag)
+    {
+        T *a_lo, *a_hi, *b_hi;
+        if(a + diag < a_end)
+        {
+            a_hi = a + diag;
+            b_hi = b;
+            a_lo = a;
+        }
+        else
+        {
+            a_hi = a_end;
+            b_hi = b + diag - len1;
+            a_lo = a + diag - len1;
+        }
+
+        while(true)
+        {
+            const unsigned offset = (a_hi - a_lo) / 2;
+            xdaga = a_hi - offset;
+            xdagb = b_hi + offset;
+            if(xdagb == b || xdaga >= a_end || (xdagb <= b_end && *xdaga > *(xdagb - 1)))
+            {
+                if(xdaga == a || xdagb >= b_end || *(xdaga - 1) <= *xdagb)
+                {
+                    break;
+                }
+                a_hi = xdaga - 1;
+                b_hi = xdagb + 1;
+            }
+            else
+            {
+                a_lo = xdaga + 1;
+            }
+        }
+    }
+}
+
 // One level of a buffered path merge
 // in and out must not overlap
 template<typename T>
@@ -322,51 +371,11 @@ __device__ void path_merge_step_buffered(T* in, T* out, unsigned level, unsigned
     const unsigned len1 = width;
     const unsigned len2 = utils::min(width, len - (merge_start + width));
 
-    T* a = in + merge_start;
-    T* a_end = a + len1;
-    T* b = a_end;
-    T* b_end = b + len2;
-    T* o_start = out + thread_idx * n_per_thread;
-
-    T* ai = a;
-    T* bi = b;
-
-    if(i_thread)
-    {
-        T *a_lo, *a_hi, *b_hi;
-        if(a + diag < a_end)
-        {
-            a_hi = a + diag;
-            b_hi = b;
-            a_lo = a;
-        }
-        else
-        {
-            a_hi = a_end;
-            b_hi = b + diag - len1;
-            a_lo = a + diag - len1;
-        }
-
-        while(true)
-        {
-            const unsigned offset = (a_hi - a_lo) / 2;
-            ai = a_hi - offset;
-            bi = b_hi + offset;
-            if(bi == b || ai >= a_end || (bi <= b_end && *ai > *(bi - 1)))
-            {
-                if(ai == a || bi >= b_end || *(ai - 1) <= *bi)
-                {
-                    break;
-                }
-                a_hi = ai - 1;
-                b_hi = bi + 1;
-            }
-            else
-            {
-                a_lo = ai + 1;
-            }
-        }
-    }
+    T* a_end = in + merge_start + len1;
+    T* b_end = a_end + len2;
+    T* o_start = out + i_thread * n_per_thread;
+    T *ai, *bi;
+    find_cross_diagonals(in + merge_start, len1, len2, diag, ai, bi);
 
     T* o = o_start;
     while(o < (o_start + n_per_thread) && o < out + len)
@@ -459,6 +468,87 @@ __global__ void path_merge_buffered_global(T* in, T* out, unsigned len, unsigned
 
     const unsigned thread_idx = blockDim.x * blockIdx.x + threadIdx.x;
     path_merge_step_buffered(in, out, level, len, thread_idx, n_per_thread);
+}
+
+// in and out must not be the same
+// all threads in each block must be assigned to the same subproblem
+template<typename T>
+__global__ void path_merge_buffered_global_shared_intermediate(T* in, T* out, unsigned len, unsigned level, unsigned n_per_thread)
+{
+    const unsigned width = 1u << level;
+    if(width >= len) return;
+
+    const unsigned blocks_per_merge = (2 * width) / (blockDim.x * n_per_thread);
+    const unsigned i_merge = blockIdx.x / blocks_per_merge;
+    const unsigned merge_start = i_merge * blocks_per_merge * blockDim.x * n_per_thread;
+
+    if(merge_start + width >= len)
+    {
+        // global to global, coalesce
+        for(unsigned i = blockIdx.x * blockDim.x * n_per_thread + threadIdx.x; i < ((blockIdx.x + 1) * blockDim.x * n_per_thread) && i < len; i += blockDim.x)
+        {
+            out[i] = in[i];
+        }
+        return;
+    }
+
+    extern __shared__ T shared[];
+
+    const unsigned idx_in_merge = blockIdx.x - (i_merge * blocks_per_merge);
+    const unsigned merge_len = utils::min(2 * width, len - merge_start);
+    const unsigned block_len = merge_len - idx_in_merge * blockDim.x * n_per_thread;
+    const unsigned diag1 = idx_in_merge * blockDim.x * n_per_thread;
+    if(diag1 > merge_len) return;
+    T *a_start, b_start, *a_end, *b_end;
+    find_cross_diagonals(in + merge_start, width, merge_len - width, diag1, a_start, b_start);
+
+    const unsigned diag2 = diag1 + block_len;
+    find_cross_diagonals(in + merge_start, width, merge_len - width, diag2, a_end, b_end);
+
+    T* local_a = shared;
+    const unsigned local_len1 = (a_end - a_start);
+    T* local_b = local_a + local_len1;
+    const unsigned local_len2 = (b_end - b_start);
+    T* local_out = local_b + local_len2;
+
+    for(T* a = a_start + threadIdx.x; a < a_end; a += blockDim.x)
+    {
+        *(local_a + (a - a_start)) = *a;
+    }
+
+    for(T* b = b_start + threadIdx.x; b < b_end; b += blockDim.x)
+    {
+        *(local_b + (b - b_start)) = *b;
+    }
+
+    __syncthreads();
+
+    const unsigned thread_diag = threadIdx.x * n_per_thread;
+    if(thread_diag < block_len)
+    {
+        T *thread_a, *thread_b;
+        find_cross_diagonals(local_a, local_len1, local_len2, thread_diag, thread_a, thread_b);
+        T* thread_out = local_out + threadIdx.x * n_per_thread;
+        T* o = thread_out;
+        while(o < (thread_out + n_per_thread) && o < local_out + block_len)
+        {
+            if(thread_a >= local_b || (thread_b < local_out && (*thread_a) > (*thread_b)))
+            {
+                *(o++) = *(thread_b++);
+            }
+            else
+            {
+                *(o++) = *(thread_a++);
+            }
+        }
+    }
+
+    __syncthreads();
+
+    for(unsigned i = threadIdx.x; i < block_len; i += blockDim.x)
+    {
+        out[blockIdx.x * blockDim.x * n_per_thread + i] = local_out[i];
+    }
 }
 
 template<typename T>
